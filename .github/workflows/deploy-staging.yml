@@ -53,20 +53,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate SSH authentication secrets
+      - name: Detect SSH auth mode
+        id: auth_mode
         shell: bash
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${VPS_SSH_KEY}" ] && [ -z "${VPS_PASSWORD}" ]; then
-            echo "Missing SSH authentication. Configure VPS_SSH_KEY or VPS_PASSWORD."
-            exit 1
+
+          key_trimmed="$(printf '%s' "${VPS_SSH_KEY}" | tr -d '[:space:]')"
+          password_trimmed="$(printf '%s' "${VPS_PASSWORD}" | tr -d '[:space:]')"
+
+          if [ -n "$key_trimmed" ]; then
+            echo "use_ssh_key=true" >> "$GITHUB_OUTPUT"
+            echo "use_password=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          if [ -n "$password_trimmed" ]; then
+            echo "use_ssh_key=false" >> "$GITHUB_OUTPUT"
+            echo "use_password=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "use_ssh_key=false" >> "$GITHUB_OUTPUT"
+          echo "use_password=false" >> "$GITHUB_OUTPUT"
+          echo "Missing SSH authentication. Configure VPS_SSH_KEY or VPS_PASSWORD."
+          exit 1
+
+      - name: Validate SSH authentication secrets
+        if: ${{ steps.auth_mode.outputs.use_ssh_key != 'true' && steps.auth_mode.outputs.use_password != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+            echo "Missing SSH authentication. Configure VPS_SSH_KEY or VPS_PASSWORD."
+            exit 1
+
       - name: Setup SSH agent
-        if: ${{ secrets.VPS_SSH_KEY != '' }}
+        if: ${{ steps.auth_mode.outputs.use_ssh_key == 'true' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
@@ -77,7 +102,7 @@ jobs:
           ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Install sshpass (password fallback)
-        if: ${{ secrets.VPS_PASSWORD != '' }}
+        if: ${{ steps.auth_mode.outputs.use_password == 'true' }}
         shell: bash
         run: |
           sudo apt-get update
