@@ -168,14 +168,43 @@ REPO_URL="$3"
 BRANCH="$4"
 PROJECT_DIR="$5"
 PM2_APP_NAME="$6"
-BACKEND_PORT="${7:-}"
-ENV_SYNC_DIR="$8"
+if [[ "$#" -ge 8 ]]; then
+	BACKEND_PORT="${7:-}"
+	ENV_SYNC_DIR="${8:-}"
+else
+	BACKEND_PORT=""
+	ENV_SYNC_DIR="${7:-}"
+fi
+if [[ -z "$ENV_SYNC_DIR" ]]; then
+	ENV_SYNC_DIR="/tmp/recovery-env"
+fi
 
 WWW_DOMAIN="www.${DOMAIN}"
 NGINX_CONF="/etc/nginx/sites-available/${DOMAIN}.conf"
 LE_CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
 LE_FULLCHAIN="${LE_CERT_DIR}/fullchain.pem"
 LE_PRIVKEY="${LE_CERT_DIR}/privkey.pem"
+SERVER_NAMES="${DOMAIN}"
+CERTBOT_DOMAINS=("-d" "${DOMAIN}")
+
+domain_has_dns() {
+	local d="$1"
+	if getent ahostsv4 "$d" >/dev/null 2>&1; then
+		return 0
+	fi
+	if getent ahostsv6 "$d" >/dev/null 2>&1; then
+		return 0
+	fi
+	return 1
+}
+
+if domain_has_dns "$WWW_DOMAIN"; then
+	SERVER_NAMES="${DOMAIN} ${WWW_DOMAIN}"
+	CERTBOT_DOMAINS=("-d" "${DOMAIN}" "-d" "${WWW_DOMAIN}")
+	echo "Detected DNS for ${WWW_DOMAIN}; including it in nginx and certbot."
+else
+	echo "DNS for ${WWW_DOMAIN} not found; deploying apex domain only."
+fi
 
 upsert_env() {
 	local key="$1"
@@ -340,13 +369,13 @@ if [[ -f "$LE_FULLCHAIN" && -f "$LE_PRIVKEY" ]]; then
 cat > "$NGINX_CONF" <<NGINX
 server {
 	listen 80;
-	server_name ${DOMAIN} ${WWW_DOMAIN};
+	server_name ${SERVER_NAMES};
 	return 301 https://\$host\$request_uri;
 }
 
 server {
 	listen 443 ssl http2;
-	server_name ${DOMAIN} ${WWW_DOMAIN};
+	server_name ${SERVER_NAMES};
 
 	root ${PROJECT_DIR}/frontend/build;
 	index index.html;
@@ -374,7 +403,7 @@ else
 cat > "$NGINX_CONF" <<NGINX
 server {
 	listen 80;
-	server_name ${DOMAIN} ${WWW_DOMAIN};
+	server_name ${SERVER_NAMES};
 
 	root ${PROJECT_DIR}/frontend/build;
 	index index.html;
@@ -404,8 +433,7 @@ systemctl restart nginx
 echo "[8/8] Issuing SSL certificate"
 # Always run certbot with --nginx so TLS server blocks are restored after the
 # temporary HTTP-only nginx config written in step [7/8].
-certbot_safe --nginx -d "$DOMAIN" -d "$WWW_DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect || \
-certbot_safe --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+certbot_safe --nginx "${CERTBOT_DOMAINS[@]}" --non-interactive --agree-tos -m "$EMAIL" --redirect
 
 echo
 echo "Recovery complete."
