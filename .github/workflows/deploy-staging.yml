@@ -6,12 +6,45 @@ on:
       - staging
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-staging
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Backend install and tests
+        working-directory: backend
+        run: |
+          npm ci
+          npm test -- --passWithNoTests
+
+      - name: Frontend install and production build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
   deploy:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
@@ -130,16 +163,6 @@ jobs:
             fi
 
             if curl -fsS --max-time 10 "http://$DOMAIN/api/health" >/dev/null; then
-              ok=1
-              break
-            fi
-
-            if curl -fsS --max-time 10 "https://$DOMAIN" >/dev/null; then
-              ok=1
-              break
-            fi
-
-            if curl -fsS --max-time 10 "http://$DOMAIN" >/dev/null; then
               ok=1
               break
             fi
