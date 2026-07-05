@@ -186,6 +186,7 @@ LE_FULLCHAIN="${LE_CERT_DIR}/fullchain.pem"
 LE_PRIVKEY="${LE_CERT_DIR}/privkey.pem"
 SERVER_NAMES="${DOMAIN}"
 CERTBOT_DOMAINS=("-d" "${DOMAIN}")
+ALLOWED_ORIGINS_VALUE="https://${DOMAIN}"
 
 domain_has_dns() {
 	local d="$1"
@@ -201,6 +202,7 @@ domain_has_dns() {
 if domain_has_dns "$WWW_DOMAIN"; then
 	SERVER_NAMES="${DOMAIN} ${WWW_DOMAIN}"
 	CERTBOT_DOMAINS=("-d" "${DOMAIN}" "-d" "${WWW_DOMAIN}")
+	ALLOWED_ORIGINS_VALUE="https://${DOMAIN},https://${WWW_DOMAIN}"
 	echo "Detected DNS for ${WWW_DOMAIN}; including it in nginx and certbot."
 else
 	echo "DNS for ${WWW_DOMAIN} not found; deploying apex domain only."
@@ -338,7 +340,7 @@ fi
 
 upsert_env "NODE_ENV" "production" "backend/.env"
 upsert_env "PORT" "$BACKEND_PORT" "backend/.env"
-upsert_env "ALLOWED_ORIGINS" "https://${DOMAIN},https://www.${DOMAIN}" "backend/.env"
+upsert_env "ALLOWED_ORIGINS" "$ALLOWED_ORIGINS_VALUE" "backend/.env"
 upsert_env "ALLOWED_BASE_DOMAIN" "${DOMAIN}" "backend/.env"
 upsert_env "APP_PUBLIC_URL" "https://${DOMAIN}" "backend/.env"
 upsert_env "MPESA_CALLBACK_URL" "https://${DOMAIN}/api/mpesa/callback" "backend/.env"
